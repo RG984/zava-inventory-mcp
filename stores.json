@@ -1,0 +1,44 @@
+[
+  {
+    "id": 1,
+    "name": "Zava Amsterdam",
+    "address": "246 Canal St, Jordaan, Amsterdam 1016",
+    "city": "Amsterdam",
+    "country": "Netherlands"
+  },
+  {
+    "id": 2,
+    "name": "Zava Berlin",
+    "address": "123 Hauptstrasse 45, 10115 Berlin",
+    "city": "Berlin",
+    "country": "Germany"
+  },
+  {
+    "id": 3,
+    "name": "Zava Paris",
+    "address": "88 Rue de Rivoli, 75001 Paris",
+    "city": "Paris",
+    "country": "France"
+  },
+  {
+    "id": 4,
+    "name": "Zava Madrid",
+    "address": "19 Gran Via, 28013 Madrid",
+    "city": "Madrid",
+    "country": "Spain"
+  },
+  {
+    "id": 5,
+    "name": "Zava Rome",
+    "address": "52 Via del Corso, 00186 Rome",
+    "city": "Rome",
+    "country": "Italy"
+  },
+  {
+    "id": 6,
+    "name": "Zava Chicago",
+    "address": "1597 Virginia Street, Chicago, Illinois, IL 60618, US",
+    "city": "Chicago",
+    "country": "United States"
+  }
+]

@@ -1,0 +1,90 @@
+[
+  {
+    "productId": 1,
+    "sku": "WBH-001",
+    "name": "Wireless Bluetooth Headphones",
+    "category": "Electronics",
+    "description": "High-quality wireless headphones with noise cancellation",
+    "price": 89.99
+  },
+  {
+    "productId": 2,
+    "sku": "EOC-002",
+    "name": "Ergonomic Office Chair",
+    "category": "Furniture",
+    "description": "Adjustable ergonomic office chair with lumbar support and breathable mesh back",
+    "price": 249.99
+  },
+  {
+    "productId": 3,
+    "sku": "SWB-003",
+    "name": "Stainless Steel Water Bottle",
+    "category": "Home & Garden",
+    "description": "Insulated stainless steel bottle that keeps drinks cold or hot for extended periods",
+    "price": 24.99
+  },
+  {
+    "productId": 4,
+    "sku": "GMK-004",
+    "name": "Gaming Mechanical Keyboard",
+    "category": "Electronics",
+    "description": "Mechanical gaming keyboard with tactile switches and customizable RGB backlighting",
+    "price": 129.99
+  },
+  {
+    "productId": 5,
+    "sku": "YM-005",
+    "name": "Yoga Mat",
+    "category": "Sports & Fitness",
+    "description": "Non-slip yoga mat with cushioned support for home, studio, and travel workouts",
+    "price": 34.99
+  },
+  {
+    "productId": 6,
+    "sku": "CM-006",
+    "name": "Coffee Maker",
+    "category": "Kitchen",
+    "description": "Programmable coffee maker with glass carafe and auto-brew scheduling",
+    "price": 79.99
+  },
+  {
+    "productId": 7,
+    "sku": "LDL-007",
+    "name": "LED Desk Lamp",
+    "category": "Home & Garden",
+    "description": "Energy-efficient LED desk lamp with adjustable brightness and flexible neck",
+    "price": 39.99
+  },
+  {
+    "productId": 8,
+    "sku": "RS-008",
+    "name": "Running Shoes",
+    "category": "Sports & Fitness",
+    "description": "Lightweight running shoes with cushioned midsoles and breathable knit upper",
+    "price": 94.99
+  },
+  {
+    "productId": 9,
+    "sku": "SC-009",
+    "name": "Smartphone Case",
+    "category": "Electronics",
+    "description": "Protective smartphone case with shock-absorbing edges and slim profile",
+    "price": 19.99
+  },
+  {
+    "productId": 10,
+    "sku": "BP-010",
+    "name": "Backpack",
+    "category": "Accessories",
+    "description": "Durable everyday backpack with padded straps, laptop sleeve, and dual-zip main compartment",
+    "price": 59.99
+  },
+  {
+    "productId": 11,
+    "sku": "GCG-011",
+    "name": "Game Console With Game",
+    "category": "Electronics",
+    "description": "Home game console bundle that includes one wireless controller and a packed-in game",
+    "price": 399.99
+  }
+]
