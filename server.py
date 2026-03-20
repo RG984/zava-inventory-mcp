@@ -1,27 +1,81 @@
 from __future__ import annotations
-
-import json
-from pathlib import Path
+import contextlib
+import logging
 from typing import Any, Optional
 
 from pydantic import BaseModel, Field
+from starlette.applications import Starlette
+from starlette.middleware import Middleware
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import JSONResponse
+from starlette.routing import Mount, Route
+
+# Custom handler for GET /mcp to return tool list for discovery
+async def get_tools_handler(request):
+    try:
+        tools = await mcp.list_tools()
+        return JSONResponse({"tools": [tool.model_dump() for tool in tools]})
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+import uvicorn
 
 try:
-    # MCP Python SDK
     from mcp.server.fastmcp import FastMCP
 except ImportError as exc:
     raise ImportError(
         "The 'mcp' package is required. Install it with: pip install mcp"
     ) from exc
 
+from mcp.server.fastmcp.server import Context
+from src.helpers import (
+    DataFileError,
+    find_product_by_sku,
+    find_store_by_id,
+    get_next_id,
+    load_inventory,
+    load_products,
+    load_stores,
+    save_inventory,
+    save_products,
+)
+from src.middleware import require_api_key
 
-BASE_DIR = Path(__file__).resolve().parent
-DATA_DIR = BASE_DIR / "data"
-PRODUCTS_FILE = DATA_DIR / "products.json"
-STORES_FILE = DATA_DIR / "stores.json"
-INVENTORY_FILE = DATA_DIR / "inventory.json"
+class LoggingMiddleware(BaseHTTPMiddleware):
+    def __init__(self, app):
+        super().__init__(app)
+        self.logger = logging.getLogger("mcp.server")
+        self.logger.setLevel(logging.INFO)
+        handler = logging.StreamHandler()
+        handler.setLevel(logging.INFO)
+        formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+        handler.setFormatter(formatter)
+        self.logger.addHandler(handler)
 
-mcp = FastMCP("zava-inventory-server")
+    async def dispatch(self, request, call_next):
+        # Skip logging for common security probe paths
+        skip_paths = ['/.aws/', '/.ada/', '/.ssh/', '/.midway/', '/.env', '/wp-admin', '/admin']
+        if any(skip in str(request.url.path) for skip in skip_paths):
+            return await call_next(request)
+        
+        self.logger.info("MCP request: %s %s", request.method, request.url)
+        self.logger.debug("Headers: %s", dict(request.headers))
+        try:
+            response = await call_next(request)
+        except Exception as exc:
+            self.logger.exception("MCP request failed")
+            raise
+        self.logger.info("MCP response: %s %s -> %s", request.method, request.url, response.status_code)
+        return response
+
+
+mcp = FastMCP(
+    "zava-inventory-server",
+    json_response=True,
+    stateless_http=True,
+)
+
+# Note: Copilot Studio sends JSON-RPC 2.0 calls directly; stateless JSON handling
+# ensures immediate replies instead of SSE stream protocol
 
 
 # -----------------------------
@@ -86,78 +140,21 @@ class InventoryAdjustmentInput(BaseModel):
     )
 
 
-# -----------------------------
-# File helpers
-# -----------------------------
-def _read_json(path: Path) -> list[dict[str, Any]]:
-    if not path.exists():
-        return []
-    with path.open("r", encoding="utf-8") as f:
-        return json.load(f)
-
-
-
-def _write_json(path: Path, payload: list[dict[str, Any]]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8") as f:
-        json.dump(payload, f, indent=2, ensure_ascii=False)
-
-
-
-def _load_products() -> list[dict[str, Any]]:
-    return _read_json(PRODUCTS_FILE)
-
-
-
-def _save_products(products: list[dict[str, Any]]) -> None:
-    _write_json(PRODUCTS_FILE, products)
-
-
-
-def _load_stores() -> list[dict[str, Any]]:
-    return _read_json(STORES_FILE)
-
-
-
-def _load_inventory() -> list[dict[str, Any]]:
-    return _read_json(INVENTORY_FILE)
-
-
-
-def _save_inventory(inventory: list[dict[str, Any]]) -> None:
-    _write_json(INVENTORY_FILE, inventory)
-
-
-
-def _next_id(rows: list[dict[str, Any]], id_field: str = "id") -> int:
-    if not rows:
-        return 1
-    return max(int(row[id_field]) for row in rows) + 1
-
-
-
-def _find_store_by_id(store_id: int) -> Optional[dict[str, Any]]:
-    return next((s for s in _load_stores() if int(s["id"]) == int(store_id)), None)
-
-
-
-def _find_product_by_sku(sku: str) -> Optional[dict[str, Any]]:
-    sku_normalized = sku.strip().lower()
-    return next((p for p in _load_products() if p["sku"].strip().lower() == sku_normalized), None)
-
 
 # -----------------------------
 # MCP tools
 # -----------------------------
 @mcp.tool()
+@require_api_key
 def get_products(
     category: Optional[str] = None,
     sku: Optional[str] = None,
     search: Optional[str] = None,
     limit: int = 50,
+    ctx: Context | None = None,
 ) -> list[Product]:
     """Return products, optionally filtered by category, SKU, or free-text search."""
-    products = _load_products()
+    products = load_products()
 
     if category:
         products = [p for p in products if p["category"].lower() == category.strip().lower()]
@@ -178,26 +175,28 @@ def get_products(
 
 
 @mcp.tool()
-def get_product_by_sku(sku: str) -> Product:
+@require_api_key
+def get_product_by_sku(sku: str, ctx: Context | None = None) -> Product:
     """Return one product by SKU."""
-    product = _find_product_by_sku(sku)
+    product = find_product_by_sku(sku)
     if not product:
         raise ValueError(f"No product found for SKU '{sku}'.")
     return Product(**product)
 
 
 @mcp.tool()
-def add_product(payload: NewProductInput) -> dict[str, Any]:
+@require_api_key
+def add_product(payload: NewProductInput, ctx: Context | None = None) -> dict[str, Any]:
     """Add a new product and optionally seed inventory rows by store."""
-    products = _load_products()
-    inventory = _load_inventory()
-    stores = _load_stores()
+    products = load_products()
+    inventory = load_inventory()
+    stores = load_stores()
 
     if any(p["sku"].strip().lower() == payload.sku.strip().lower() for p in products):
         raise ValueError(f"SKU '{payload.sku}' already exists.")
 
     new_product = Product(
-        productId=_next_id(products, "productId"),
+        productId=get_next_id(products, "productId"),
         sku=payload.sku,
         name=payload.name,
         category=payload.category,
@@ -205,9 +204,9 @@ def add_product(payload: NewProductInput) -> dict[str, Any]:
         price=payload.price,
     )
     products.append(new_product.model_dump())
-    _save_products(products)
+    save_products(products)
 
-    next_inventory_id = _next_id(inventory, "id")
+    next_inventory_id = get_next_id(inventory, "id")
     seeded_rows = []
     valid_store_ids = {int(s["id"]) for s in stores}
 
@@ -233,7 +232,7 @@ def add_product(payload: NewProductInput) -> dict[str, Any]:
 
     if seeded_rows:
         inventory.extend(seeded_rows)
-        _save_inventory(inventory)
+        save_inventory(inventory)
 
     return {
         "message": "Product added successfully.",
@@ -243,20 +242,23 @@ def add_product(payload: NewProductInput) -> dict[str, Any]:
 
 
 @mcp.tool()
-def get_stores() -> list[Store]:
+@require_api_key
+def get_stores(ctx: Context | None = None) -> list[Store]:
     """Return all stores."""
-    return [Store(**s) for s in _load_stores()]
+    return [Store(**s) for s in load_stores()]
 
 
 @mcp.tool()
+@require_api_key
 def list_inventory_by_store(
     store_id: Optional[int] = None,
     store_name: Optional[str] = None,
     low_stock_only: bool = False,
+    ctx: Context | None = None,
 ) -> dict[str, Any]:
     """Return inventory rows for a store, resolved by store_id or store_name."""
-    stores = _load_stores()
-    inventory = _load_inventory()
+    stores = load_stores()
+    inventory = load_inventory()
 
     if store_id is None and not store_name:
         raise ValueError("Provide either store_id or store_name.")
@@ -283,9 +285,10 @@ def list_inventory_by_store(
 
 
 @mcp.tool()
-def update_inventory(payload: InventoryAdjustmentInput) -> dict[str, Any]:
+@require_api_key
+def update_inventory(payload: InventoryAdjustmentInput, ctx: Context | None = None) -> dict[str, Any]:
     """Update quantity/reorderLevel for a specific store + SKU inventory row."""
-    inventory = _load_inventory()
+    inventory = load_inventory()
 
     target = next(
         (
@@ -306,7 +309,7 @@ def update_inventory(payload: InventoryAdjustmentInput) -> dict[str, Any]:
     if payload.reorderLevel is not None:
         target["reorderLevel"] = int(payload.reorderLevel)
 
-    _save_inventory(inventory)
+    save_inventory(inventory)
 
     return {
         "message": "Inventory updated successfully.",
@@ -315,11 +318,12 @@ def update_inventory(payload: InventoryAdjustmentInput) -> dict[str, Any]:
 
 
 @mcp.tool()
-def get_inventory_summary() -> dict[str, Any]:
+@require_api_key
+def get_inventory_summary(ctx: Context | None = None) -> dict[str, Any]:
     """Return high-level counts for quick dashboarding/testing."""
-    products = _load_products()
-    stores = _load_stores()
-    inventory = _load_inventory()
+    products = load_products()
+    stores = load_stores()
+    inventory = load_inventory()
 
     total_units = sum(int(row["quantity"]) for row in inventory)
     low_stock_rows = [row for row in inventory if int(row["quantity"]) <= int(row.get("reorderLevel", 0))]
@@ -332,7 +336,33 @@ def get_inventory_summary() -> dict[str, Any]:
         "lowStockRowCount": len(low_stock_rows),
     }
 
+@mcp.tool()
+@require_api_key
+def get_store_by_id(store_id: int, ctx: Context | None = None) -> dict[str, Any]:
+    """Return one store by its identifier."""
+    store = find_store_by_id(store_id)
+    if not store:
+        raise ValueError(f"No store found for id '{store_id}'.")
+    return store
+
+@contextlib.asynccontextmanager
+async def lifespan(app: Starlette):
+    async with mcp.session_manager.run():
+        yield
+
+mcp_app = mcp.streamable_http_app()
+
+app = Starlette(
+    routes=[
+        Route("/mcp", get_tools_handler, methods=["GET"]),
+        Mount("/", app=mcp_app),
+    ],
+    middleware=[Middleware(LoggingMiddleware)],
+    lifespan=lifespan,
+)
 
 if __name__ == "__main__":
-    # Runs over stdio, which is the most common transport for local MCP integrations.
-    mcp.run()
+    try:
+        uvicorn.run(app, host="0.0.0.0", port=8000)
+    except DataFileError as exc:
+        raise SystemExit(f"Data file error: {exc}") from exc
